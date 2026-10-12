@@ -1,3 +1,3 @@
-from ._pyrxmesh_beam import compute_edge_lengths
+from ._pyrxmesh_beam import compute_rest_shape, make_energy
 
-__all__ = ["compute_edge_lengths"]
+__all__ = ["compute_rest_shape", "make_energy"]

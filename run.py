@@ -1,55 +1,54 @@
+import src.beam as beam
+
 import pyrxmesh as rx
+import torch
 import pyrxmesh_beam
 import polyscope as ps
 import numpy as np
 
+
 def main()->None:
     rx.init(0)
+    torch.cuda.set_device(0)
     ps.init()
-    spacing = 1.0
-    num_vertices_x = 6
-    num_vertices_y = 5
-    vertices = np.empty(shape=(num_vertices_x*num_vertices_y, 3),dtype="float32")
 
-    face_shape = (num_vertices_y - 1, (num_vertices_x - 1) * 2)
-    face_count = face_shape[0] * face_shape[1]
-    faces = np.empty(shape=(face_count,3),dtype="uint32")
+    beam_width = 10
+    beam_height = 6
+    beam_spacing = 1.0
 
-    vertex_index = 0
-    for y in range(num_vertices_y):
-        for x in range(num_vertices_x):
-            vertices[vertex_index] = [x * spacing + ((y+1) % 2) * (spacing * 0.5), (num_vertices_y - y) * spacing,0]
-            vertex_index += 1
+    anim_offset = 2.0
 
-    face_index = 0
-    #input is top of triangle
-    def create_upwards_triangle(x,y,even=0):
-        top          =  y      * num_vertices_x + x + even
-        bottom_left  = (y + 1) * num_vertices_x + x
-        bottom_right = (y + 1) * num_vertices_x + x + 1
+    mesh = rx.RXMeshStatic(*beam.generate_beam(beam_width, beam_height, beam_spacing))
 
-        faces[face_shape[1] * y + 2 * x] = [top,bottom_left,bottom_right]
-    
-    #input is top left of triangle
-    def create_downwards_triangle(x,y,even=0):
-        bottom    = (y + 1) * num_vertices_x + x + even
-        top_left  = y * num_vertices_x + x
-        top_right = y * num_vertices_x + x + 1
+    rest_shape = mesh.add_face_attribute("fRestShape", dtype="float32", dim=4)
+    coordinates = mesh.input_vertex_coordinates()
 
-        faces[face_shape[1] * y + 2 * x + 1] = [top_left,bottom,top_right]
-    
-    for y in range(0, num_vertices_y - 1, 2):    
-        for x in range(num_vertices_x - 1):
-            create_upwards_triangle(x,y)
-            create_downwards_triangle(x,y,1)
+    pyrxmesh_beam.compute_rest_shape(mesh,coordinates,rest_shape)
+
+    coords = coordinates.to_torch("device").detach().requires_grad_(True)
+
+    #offset right side of beam
+    offset = torch.zeros_like(coords)
+    offset[beam_width - 1::beam_width,1] = anim_offset
+
+    with torch.no_grad():
+        coords.add_(offset)
+
+    energy = pyrxmesh_beam.make_energy(mesh,rest_shape)
+
+    steps = 1000
+    gradient = torch.empty(coords.shape, dtype=coords.dtype, device=coords.device)
+    #gradient = torch.empty_like(coords,dtype=coords.dtype,device=coords.device)
+
+    lr = 1e-3
+    for i in range(steps):
+        loss = energy.value_and_grad(coords,out=gradient,copy="never")
+        print(loss.detach().cpu().numpy())
+        with torch.no_grad():
+            coords.add_(gradient, alpha=-lr)
         
-    for y in range(1, num_vertices_y - 1, 2):    
-        for x in range(num_vertices_x - 1):
-            create_downwards_triangle(x,y)
-            create_upwards_triangle(x,y,1)
+    ps.register_surface_mesh("mesh", coords.detach().cpu().numpy(), mesh.faces(), edge_width=1.0,edge_color=(0.0,0.0,0.0))
     
-    print(face_index,face_count)
-    ps.register_surface_mesh("mesh", vertices, faces, edge_width=1.0,edge_color=(0.0,0.0,0.0))
     ps.show()
 
 if __name__ == "__main__":
