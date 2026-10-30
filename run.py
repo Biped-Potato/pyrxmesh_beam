@@ -22,10 +22,17 @@ def main()->None:
     mesh = rx.RXMeshStatic(*beam.generate_beam(beam_width, beam_height, beam_spacing))
 
     rest_shape = mesh.add_face_attribute("fRestShape", dtype="float32", dim=4)
+    stiffness_attr = mesh.add_face_attribute("fStiffness", dtype="float32", dim=1)
     coordinates = mesh.input_vertex_coordinates()
+    
     
     pyrxmesh_beam.compute_rest_shape(mesh,coordinates,rest_shape)
 
+
+    stiffness = stiffness_attr.to_torch("device").detach().requires_grad_(True)
+    with torch.no_grad():
+        stiffness.fill_(1000.0)
+    
     coords = coordinates.to_torch("device").detach().requires_grad_(True)
 
     #offset right side of beam
@@ -39,7 +46,7 @@ def main()->None:
 
     initial_coords = coords.detach().clone()
 
-    energy = pyrxmesh_beam.make_energy(mesh,rest_shape)
+    energy = pyrxmesh_beam.make_energy(mesh,rest_shape,stiffness_attr)
 
     lower, upper = mesh.bounding_box()
 
@@ -91,44 +98,10 @@ def main()->None:
         ending_energy = loss.item()
         return (total_time, ending_energy)
 
-    steps_begin = 1000
-    steps_end = 25000
-    steps_testing_increment = 1000
+    inner_iterations = 10000
+    final_time, final_energy = simulate(inner_iterations)
+    print(final_time, final_energy)
 
-    times = []
-    energies = []
-    iterations = []
-    for i in range(steps_begin, steps_end+1, steps_testing_increment):
-        time, final_energy = simulate(i)
-        times.append(time)
-        energies.append(final_energy)
-        iterations.append(i)
-        print(i, "steps complete", "time",time,"final energy",final_energy)
-
-    plt.figure(1)
-
-    plt.plot(iterations, energies, label = "final energy")
-    plt.plot(iterations, times, label = "time")
-    plt.legend()
-    plt.xlabel("Iterations")
-
-    plt.figure(2)
-        
-    plt.plot(iterations, energies, label = "final energy")
-    plt.legend()
-    plt.xlabel("Iterations")
-    plt.ylabel("Final Energies")
-    
-    plt.figure(3)
-
-    plt.plot(iterations, times, label = "time")
-    plt.legend()
-    plt.xlabel("Iterations")
-    plt.ylabel("Time")
-
-
-    plt.show()
-    
     m = ps.register_surface_mesh("mesh", coords.detach().cpu().numpy(), mesh.faces(), edge_width=1.0,edge_color=(0.0,0.0,0.0))
     m.add_scalar_quantity("boundary_condition",free_mask.detach().cpu().numpy(),'vertices')
 

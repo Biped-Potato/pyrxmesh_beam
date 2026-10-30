@@ -55,11 +55,12 @@ void compute_rest_shape(py::object mesh_obj,
 using Problem =
     diff::ScalarGradientProblem<T, 3, VertexHandle>;
 
-void add_terms(Problem& problem, py::object rest_coords_obj){
+void add_terms(Problem& problem, py::object rest_coords_obj, py::object stiffness_obj){
     auto rest_shape  = pyrxmesh::face_attribute<T>(rest_coords_obj);
+    auto stiffness   = pyrxmesh::face_attribute<T>(stiffness_obj);
 
     problem.template add_term<Op::FV>(
-        [rest_shape] __device__(const auto& fh, const auto& iter, auto& opt_var) {
+        [rest_shape, stiffness] __device__(const auto& fh, const auto& iter, auto& opt_var) {
             // fh is a face handle
             // iter is an iterator over fh's vertices
             // opt_var is the uv coordinates
@@ -104,7 +105,7 @@ void add_terms(Problem& problem, py::object rest_coords_obj){
             // Compute symmetric Dirichlet energy
             Eigen::Matrix<ActiveT, 2, 2> J = M * Mr.inverse();
 
-            ActiveT res = A * (J.squaredNorm() + J.inverse().squaredNorm());
+            ActiveT res = stiffness(fh, 0) * A * (J.squaredNorm() + J.inverse().squaredNorm());
 
             return res;
         });
@@ -112,10 +113,11 @@ void add_terms(Problem& problem, py::object rest_coords_obj){
 
 std::shared_ptr<diff::ScalarEnergyBase> make_energy(
     py::object mesh_obj,
-    py::object rest_coords_obj
+    py::object rest_coords_obj,
+    py::object stiffness_obj
 ){
     auto energy = std::make_shared<Problem>(mesh_obj);
-    add_terms(*energy, rest_coords_obj);
+    add_terms(*energy, rest_coords_obj, stiffness_obj);
     return energy;
 }
 
@@ -135,6 +137,7 @@ PYBIND11_MODULE(_pyrxmesh_beam, m)
         "make_energy",
         &make_energy,
         py::arg("mesh"),
-        py::arg("rest_coords")
+        py::arg("rest_coords"),
+        py::arg("stiffness")
     );
 }
