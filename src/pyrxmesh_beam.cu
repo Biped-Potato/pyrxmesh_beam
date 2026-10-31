@@ -105,7 +105,7 @@ void add_terms(Problem& problem, py::object rest_coords_obj, py::object stiffnes
             // Compute symmetric Dirichlet energy
             Eigen::Matrix<ActiveT, 2, 2> J = M * Mr.inverse();
 
-            ActiveT res = stiffness(fh, 0) * A * (J.squaredNorm() + J.inverse().squaredNorm());
+            ActiveT res = expf(stiffness(fh, 0)) * A * (J.squaredNorm() + J.inverse().squaredNorm());
 
             return res;
         });

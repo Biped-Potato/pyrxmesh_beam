@@ -31,7 +31,7 @@ def main()->None:
 
     stiffness = stiffness_attr.to_torch("device").detach().requires_grad_(True)
     with torch.no_grad():
-        stiffness.fill_(1000.0)
+        stiffness.fill_(1.0)
     
     coords = coordinates.to_torch("device").detach().requires_grad_(True)
 
@@ -57,8 +57,24 @@ def main()->None:
     
     gradient = torch.empty_like(coords,memory_format=torch.contiguous_format)
 
-    ps.register_surface_mesh("initial_mesh", coords.detach().cpu().numpy(), mesh.faces(), edge_width=1.0,edge_color=(0.0,0.0,0.0),enabled=False)
+    coords_target_linear = torch.zeros_like(coords, device="cuda")
+    coords_target_linear[(beam_width) // 2][0] = coords[(beam_width) // 2][0]
+    coords_target_linear[(beam_width) // 2][1] = 0.5
+    coords_target_linear[(beam_width) // 2][2] = coords[(beam_width) // 2][2]
+
+    p = torch.zeros_like(coords, device="cuda")
+    p[(beam_width) // 2][0] = 1
+    p[(beam_width) // 2][1] = 1
+    p[(beam_width) // 2][2] = 1
+
+
+    coords_target_global = coords_target_linear[mesh.linear_to_global(rx.ElementKind.Vertex)]
+    p_global = p[mesh.linear_to_global(rx.ElementKind.Vertex)]
+
     
+    m1 = ps.register_surface_mesh("initial_mesh", coords.detach().cpu().numpy(), mesh.faces(), edge_width=1.0,edge_color=(0.0,0.0,0.0),enabled=False)
+    #m1.add_scalar_quantity("target point",coords_target_np_global.detach().cpu().numpy(),'vertices')
+
     #returns time and final energy
     def simulate(steps) -> tuple[float, float]:
         with torch.no_grad():
@@ -99,8 +115,16 @@ def main()->None:
         return (total_time, ending_energy)
 
     inner_iterations = 10000
-    final_time, final_energy = simulate(inner_iterations)
-    print(final_time, final_energy)
+    outer_iterations = 1
+    target_y = 3.0
+
+    for i in range(outer_iterations):
+        final_time, final_energy = simulate(inner_iterations)
+
+        # n x 3
+        partial_f_u = torch.mul(p_global, torch.subtract(coords, coords_target_global))
+
+        print(final_time, final_energy)
 
     m = ps.register_surface_mesh("mesh", coords.detach().cpu().numpy(), mesh.faces(), edge_width=1.0,edge_color=(0.0,0.0,0.0))
     m.add_scalar_quantity("boundary_condition",free_mask.detach().cpu().numpy(),'vertices')
